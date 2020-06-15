@@ -104,7 +104,11 @@ public enum CommandType implements ProtocolKeyword {
 
     // CLUSTER
 
-    ASKING, CLUSTER;
+    ASKING, CLUSTER,
+
+    // CLIENT TRACKING
+
+    TRACKING;
 
     public final byte[] bytes;
 

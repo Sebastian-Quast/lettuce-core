@@ -18,6 +18,10 @@ package io.lettuce.core;
 import static io.lettuce.core.LettuceStrings.isEmpty;
 import static io.lettuce.core.LettuceStrings.isNotEmpty;
 
+import io.lettuce.core.serverassisted.ServerAssistedCommandHandler;
+import io.lettuce.core.serverassisted.ServerAssistedEndpoint;
+import io.lettuce.core.serverassisted.StatefulRedisServerAssistedConnection;
+import io.lettuce.core.serverassisted.StatefulRedisServerAssistedConnectionImpl;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.time.Duration;
@@ -322,6 +326,41 @@ public class RedisClient extends AbstractRedisClient {
         return future.thenApply(channelHandler -> (S) connection);
     }
 
+    public StatefulRedisServerAssistedConnection<String, String> connectServerAssisted() {
+        return getConnection(connectServerAssistedAsync(newStringStringCodec(), redisURI, getDefaultTimeout()));
+    }
+
+    private<K, V>  ConnectionFuture<StatefulRedisServerAssistedConnection<K,V>> connectServerAssistedAsync(RedisCodec<K, V> codec, RedisURI redisURI, Duration timeout) {
+        assertNotNull(codec);
+        checkValidRedisURI(redisURI);
+        logger.debug("Trying to get a Redis connection for: " + redisURI);
+
+        ServerAssistedEndpoint endpoint = new ServerAssistedEndpoint(getOptions(), getResources());
+        RedisChannelWriter writer = endpoint;
+
+        if (CommandExpiryWriter.isSupported(getOptions())) {
+            writer = new CommandExpiryWriter(writer, getOptions(), getResources());
+        }
+
+        StatefulRedisServerAssistedConnectionImpl<K, V> connection = newStatefulRedisServerAssistedConnection(endpoint, writer, codec, timeout);
+        ConnectionFuture<StatefulRedisServerAssistedConnection<K, V>> future = connectStatefulAsync(connection, endpoint, redisURI,
+            () -> new ServerAssistedCommandHandler<>(getOptions(), getResources(), endpoint, codec));
+
+        future.whenComplete((channelHandler, throwable) -> {
+
+            if (throwable != null) {
+                connection.close();
+            }
+        });
+
+        return future.whenComplete((conn, throwable) -> {
+            if (throwable != null) {
+                conn.close();
+            }
+        });
+    }
+
+
     /**
      * Open a new pub/sub connection to a Redis server that treats keys and values as UTF-8 strings.
      *
@@ -610,6 +649,11 @@ public class RedisClient extends AbstractRedisClient {
     // -------------------------------------------------------------------------
     // Implementation hooks and helper methods
     // -------------------------------------------------------------------------
+
+    protected <K, V> StatefulRedisServerAssistedConnectionImpl<K, V> newStatefulRedisServerAssistedConnection(ServerAssistedEndpoint endpoint, RedisChannelWriter channelWriter,
+        RedisCodec<K, V> codec, Duration timeout) {
+        return new StatefulRedisServerAssistedConnectionImpl<>(endpoint, channelWriter, codec, timeout);
+    }
 
     /**
      * Create a new instance of {@link StatefulRedisPubSubConnectionImpl} or a subclass.
